@@ -91,11 +91,10 @@ def main(_):
 
                 loss_value = sess.run(loss, feed_dict={X: x, Y: y})
                 #print("Step: {}, loss: {}".format(step, loss_value))
-                logging.debug("Step: {%d}, loss: {:%f}",step, loss_value)
-                if step% 1000 == 0:
-                    (w,b) = sess.run([weight,bias])
-                    logging.debug("Step: {%d}, loss: {:%f},weight:{%f},bias:{%f}",
-                        step, loss_value,w,b)
+                #logging.debug("Step: {%d}, loss: {:%f}",step, loss_value)
+                (w_tmp,b_tmp) = sess.run([w,b])
+                logging.debug("Step: {%d}, loss: {%f},weight:{%f},bias:{%f}",
+                        step, loss_value,w_tmp,b_tmp)
 
         # Ask for all the services to stop.
         sv.stop()

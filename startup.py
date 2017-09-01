@@ -198,6 +198,6 @@ if __name__ == "__main__":
     #logging.basicConfig(format=LOG_FORMAT,level=logging.DEBUG,filename="./ts.log",filemode='w')
     logging.basicConfig(format=LOG_FORMAT,level=logging.DEBUG)
     #logging.debug("hello")
-    #k8s_deploy_ts("ts-0002",1,4,"./ts_worker.py")
-    k8s_kill_all_ts_process("ts-0002")
+    k8s_deploy_ts("ts-0002",1,4,"./ts_worker.py")
+    #k8s_kill_all_ts_process("ts-0002")
     pass
