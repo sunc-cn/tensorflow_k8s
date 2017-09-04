@@ -131,46 +131,49 @@ def k8s_distribute_tf_containers(deployment_name,ps_count,worker_count):
     return (ps_list,worker_list)
 
 # k8s_startup_tf_process,startup a tf process
-def k8s_startup_tf_process(deployment_name,ps_hosts,worker_hosts,job_name,task_index):
+def k8s_startup_tf_process(deployment_name,ps_hosts,worker_hosts,job_name,task_index,tf_file):
     command_str = "kubectl exec -it "+deployment_name 
     command_str += " -- python /home/startup_worker.py --ps_hosts=\""+ ps_hosts + "\""
     command_str += " --worker_hosts=\"" + worker_hosts + "\""
     command_str += " --job_name=" + job_name + " --task_index=" + str(task_index)
     #print(command_str)
-    if not k8s_check_worker_is_running(deployment_name):
+    if not k8s_check_worker_is_running(deployment_name,tf_file):
         print(command_str)
         (s,e) = call_shell(command_str)
         if k8s_check_err(e):
-            print("k8s_startup_tf_process,error:%s,command_str:%s",e,command_str)
+            logging.error("k8s_startup_tf_process,error:%s,command_str:%s",e,command_str)
         else:
-            print("k8s_startup_tf_process,s:%s,e:%s",s,e)
+            logging.debug("k8s_startup_tf_process,s:%s,e:%s",s,e)
     pass
 
 # k8s_check_worker_is_running,check if the tf's process is running
 def k8s_check_worker_is_running(deployment_name,tf_file):
     base_name = os.path.basename(tf_file)
     command_str = "kubectl exec -it " + deployment_name + " -- ps -ef | grep \"/home/" + base_name + "\""
-    return call_k8s_command(command_str) 
+    (s,e) = call_shell(command_str)
+    if len(s) == 0:
+        return False
+    return True
 
 #  k8s_deploy_tf, copy files to tf's container and startup a tf process
-def k8s_deploy_tf(deployment_name,ps_count,worker_count,ts_worker_file):
-    (ps_list,worker_list) = k8s_distribute_ts_images(deployment_name,ps_count,worker_count)
+def k8s_deploy_tf(deployment_name,ps_count,worker_count,tf_worker_file):
+    (ps_list,worker_list) = k8s_distribute_tf_containers(deployment_name,ps_count,worker_count)
     ps_port = 20000
     worker_port = 20001
     ps_ips_str = ""
     for item in ps_list:
         (image,ip) = item
         ps_ips_str += ip+":"+str(ps_port) + ","
-        ret = k8s_deploy_file_only(ts_worker_file,image)
+        ret = k8s_deploy_tf_file(tf_worker_file,image)
         #print("deploy ps ret:",ret)
-        ret = k8s_deploy_file_only("./startup_worker.py",image)
+        ret = k8s_deploy_tf_file("./startup_worker.py",image)
     worker_ips_str = ""
     for item in worker_list:
         (image,ip) = item
         worker_ips_str += ip+":"+str(worker_port) + ","
-        ret = k8s_deploy_file_only(ts_worker_file,image)
+        ret = k8s_deploy_tf_file(tf_worker_file,image)
         #print("deploy worker ret:",ret)
-        ret = k8s_deploy_file_only("./startup_worker.py",image)
+        ret = k8s_deploy_tf_file("./startup_worker.py",image)
     if len(ps_ips_str) > 1:
         ps_ips_str = ps_ips_str[:len(ps_ips_str)-1]
     if len(worker_ips_str) > 1:
@@ -181,13 +184,13 @@ def k8s_deploy_tf(deployment_name,ps_count,worker_count,ts_worker_file):
     ps_index = 0
     for item in ps_list:
         (image,ip) = item
-        k8s_startup_tf_process(image,ps_ips_str,worker_ips_str,"ps",ps_index)
+        k8s_startup_tf_process(image,ps_ips_str,worker_ips_str,"ps",ps_index,tf_worker_file)
         ps_index += 1
     logging.debug("finish startup ps server")
     worker_index = 0
     for item in worker_list:
         (image,ip) = item
-        k8s_startup_tf_process(image,ps_ips_str,worker_ips_str,"worker",worker_index)
+        k8s_startup_tf_process(image,ps_ips_str,worker_ips_str,"worker",worker_index,tf_worker_file)
         worker_index += 1
     logging.debug("finish startup worker server")
     pass 
@@ -229,6 +232,28 @@ def main(args):
                 break
             wait_times -= 1
         logging.debug("k8s_create_tf_deployment:%s,count:%s,finished",args.init,args.n)
+    if args.deploy and args.tf and 0 != (int(args.ps) + int(args.wk)):
+        logging.debug("k8s_deploy_tf:%s,ps:%s,worker:%s,tf file:%s,start",
+                args.deploy,args.ps,args.wk,args.tf)
+        ps = 0
+        wk = 0
+        if args.ps == "":
+            ps = 0
+        else:
+            ps = int(args.ps)
+        if args.wk == "":
+            wk = 0
+        else:
+            wk = int(args.wk)
+        k8s_deploy_tf(args.deploy,ps,wk,args.tf)
+        logging.debug("k8s_deploy_tf:%s,ps:%s,worker:%s,tf file:%s,finished",
+                args.deploy,args.ps,args.wk,args.tf)
+
+        if args.shutdown:
+            logging.debug("k8s_kill_tf_processes:%s,start",args.shutdwon)
+            k8s_kill_tf_processes(args.shutdwon)
+            logging.debug("k8s_kill_tf_processes:%s,finished",args.shutdwon)
+            pass
         
 
 if __name__ == "__main__":
@@ -239,9 +264,14 @@ if __name__ == "__main__":
     #logging.basicConfig(format=LOG_FORMAT,level=logging.DEBUG,filename="./ts.log",filemode='w')
     logging.basicConfig(format=LOG_FORMAT,level=logging.DEBUG)
     parser = argparse.ArgumentParser("a kubenetes commands wrapper for tensorflow.")
-    parser.add_argument("-destory",help="destory a series of contianer with specify name.example: ./startup.py -destory ts-0002")
-    parser.add_argument("-init",help="init a series of contianer with specify name,default without --n init a contianer.example: ./startup.py -init ts-0002 --n 5")
-    parser.add_argument("--n",help="set the number of contianers")
+    parser.add_argument("-destory",help="<-destory=deployment_name>, destory a series of contianer with specify name.example: ./startup.py -destory ts-0002")
+    parser.add_argument("-init",help="<-init=deployment_name>, init a series of contianer with specify name,default without --n init a contianer.example: ./startup.py -init ts-0002 --n 5")
+    parser.add_argument("--n",help="<--n=number>, set the number of contianers")
+    parser.add_argument("-deploy",help="<-deploy=deployment_name>, deploy tensorflow processes,example: ./startup.py -deploy ts-0002 --ps 1 --wk 4 --tf ./ts_worker.py")
+    parser.add_argument("--ps",help="<--ps=number>, set the number of ps worker")
+    parser.add_argument("--wk",help="<--wk=number>, set the number of computation worker")
+    parser.add_argument("--tf",help="<--tf=file_path>, set the file of tensorflow application")
+    parser.add_argument("-shutdown",help="<-shutdown=deployment_name>, shutdow tensorflow processes,with parameter,deployment name.example: ./startup.py -shutdown ts-0002")
 
     args = parser.parse_args()
     main(args)
