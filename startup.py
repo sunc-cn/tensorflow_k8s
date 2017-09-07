@@ -42,7 +42,9 @@ def k8s_destory_deployment(deployment_name):
 
 # k8s_create_tf_deployment,create new container from tensorflow image.
 def k8s_create_tf_deployment(deployment_name):
-    command_str = "kubectl run " + deployment_name+ " --image=tensorflow/tensorflow"
+    # TODO, use your tensorflow's image
+    #command_str = "kubectl run " + deployment_name+ " --image=tensorflow/tensorflow"
+    command_str = "kubectl run " + deployment_name+ " --image=ccr.ccs.tencentyun.com/g7_docker/tensorflow"
     return call_k8s_command(command_str)
 
 # k8s_check_tf_deployment,check if the specify deployment_name deploy on k8s success.
@@ -211,6 +213,23 @@ def k8s_kill_single_tf_process(contianer_name):
         (s,e) = call_shell(command_str)
     pass
 
+#  k8s_copy_file_to_tf, copy files to tf's container
+def k8s_copy_file_to_tf(deployment_name,file_path):
+    logging.debug("k8s_copy_file_to_tf start,deployment_name:%s,file_path:%s",deployment_name,file_path)
+    images = k8s_get_tf_containers(deployment_name)
+    for k,v in images.items():
+        k8s_deploy_tf_file(file_path,k)
+    logging.debug("k8s_copy_file_to_tf end,deployment_name:%s,file_path:%s",deployment_name,file_path)
+
+def k8s_exec_command_on_all_tfs(deployment_name,command_str):
+    logging.debug("k8s_exec_command_on_all_tfs,start,deployment_name:%s,command_str:%s",deployment_name,deployment_name)
+    images = k8s_get_tf_containers(deployment_name)
+    for k,v in images.items():
+        tmp_command_str = "kubectl exec -it " + k + " -- " + command_str
+        print(tmp_command_str)
+        call_k8s_command(tmp_command_str)
+    logging.debug("k8s_exec_command_on_all_tfs,end,deployment_name:%s,command_str:%s",deployment_name,deployment_name)
+
 def main(args):
     if args.destory:
         logging.debug("k8s_destory_deployment:%s,start",args.destory)
@@ -232,9 +251,9 @@ def main(args):
                 break
             wait_times -= 1
         logging.debug("k8s_create_tf_deployment:%s,count:%s,finished",args.init,args.n)
-    if args.deploy and args.tf and 0 != (int(args.ps) + int(args.wk)):
+    if args.startup and args.tf and 0 != (int(args.ps) + int(args.wk)):
         logging.debug("k8s_deploy_tf:%s,ps:%s,worker:%s,tf file:%s,start",
-                args.deploy,args.ps,args.wk,args.tf)
+                args.startup,args.ps,args.wk,args.tf)
         ps = 0
         wk = 0
         if args.ps == "":
@@ -245,15 +264,23 @@ def main(args):
             wk = 0
         else:
             wk = int(args.wk)
-        k8s_deploy_tf(args.deploy,ps,wk,args.tf)
+        k8s_deploy_tf(args.startup,ps,wk,args.tf)
         logging.debug("k8s_deploy_tf:%s,ps:%s,worker:%s,tf file:%s,finished",
-                args.deploy,args.ps,args.wk,args.tf)
+                args.startup,args.ps,args.wk,args.tf)
 
-        if args.shutdown:
-            logging.debug("k8s_kill_tf_processes:%s,start",args.shutdwon)
-            k8s_kill_tf_processes(args.shutdwon)
-            logging.debug("k8s_kill_tf_processes:%s,finished",args.shutdwon)
-            pass
+    if args.shutdown:
+        logging.debug("k8s_kill_tf_processes:%s,start",args.shutdown)
+        k8s_kill_tf_processes(args.shutdown)
+        logging.debug("k8s_kill_tf_processes:%s,finished",args.shutdown)
+    if args.cp and args.f:
+        logging.debug("k8s_copy_file_to_tf,start,cp:%s,file:%s",args.cp,args.f)
+        k8s_copy_file_to_tf(args.cp,args.f)
+        logging.debug("k8s_copy_file_to_tf,end,cp:%s,file:%s",args.cp,args.f)
+    if args.run and args.c:
+        logging.debug("k8s_exec_command_on_all_tfs,run:%s,command_str:%s,start",args.run,args.c)
+        k8s_exec_command_on_all_tfs(args.run,args.c)
+        logging.debug("k8s_exec_command_on_all_tfs,run:%s,command_str:%s,end",args.run,args.c)
+        pass
         
 
 if __name__ == "__main__":
@@ -267,11 +294,16 @@ if __name__ == "__main__":
     parser.add_argument("-destory",help="<-destory=deployment_name>, destory a series of contianer with specify name.example: ./startup.py -destory ts-0002")
     parser.add_argument("-init",help="<-init=deployment_name>, init a series of contianer with specify name,default without --n init a contianer.example: ./startup.py -init ts-0002 --n 5")
     parser.add_argument("--n",help="<--n=number>, set the number of contianers")
-    parser.add_argument("-deploy",help="<-deploy=deployment_name>, deploy tensorflow processes,example: ./startup.py -deploy ts-0002 --ps 1 --wk 4 --tf ./ts_worker.py")
+    parser.add_argument("-startup",help="<-startup=deployment_name>, startup tensorflow processes,example: ./startup.py -startup ts-0002 --ps 1 --wk 4 --tf ./ts_worker.py")
     parser.add_argument("--ps",help="<--ps=number>, set the number of ps worker")
     parser.add_argument("--wk",help="<--wk=number>, set the number of computation worker")
     parser.add_argument("--tf",help="<--tf=file_path>, set the file of tensorflow application")
-    parser.add_argument("-shutdown",help="<-shutdown=deployment_name>, shutdow tensorflow processes,with parameter,deployment name.example: ./startup.py -shutdown ts-0002")
+    parser.add_argument("-shutdown",help="<-shutdown=deployment_name>, shutdown tensorflow processes,with parameter,deployment name.example: ./startup.py -shutdown ts-0002")
+    parser.add_argument("-cp",help="<-cp=deployment_name>, copy file to all container.example: ./startup.py -cp ts-0002 --f ./ts_worker.py")
+    parser.add_argument("--f",help="<-f=file_path>, set the file path be copied.")
+    parser.add_argument("-run",help="<-run=deployment_name>, exec command on all container.example: ./startup.py -run ts-0002 --c ls")
+    parser.add_argument("--c",help="<-c=command_str>, set the command be executed.")
 
     args = parser.parse_args()
     main(args)
+    pass
