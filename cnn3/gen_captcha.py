@@ -42,18 +42,15 @@ def generate_image(dst_path):
     image.write(captcha_text, dst_path + "/" +captcha_text + '.jpg')  # 写到文件
  
     captcha_image = Image.open(captcha)
-    print(captcha_text)
-    print(captcha_image)
     captcha_image = np.array(captcha_image)
-    print(captcha_image)
-    print("********************:",captcha_image.ndim,captcha_image.shape)
-    print(captcha_image.data)
     return captcha_text, captcha_image
  
 if __name__ == '__main__':
-    generate_image("./res")
     # 测试
     #text, image = gen_captcha_text_and_image()
+        for i in range(10000):
+            generate_image("./res")
+ 
     #f = plt.figure()
     #ax = f.add_subplot(111)
     #ax.text(0.1, 0.9,text, ha='center', va='center', transform=ax.transAxes)

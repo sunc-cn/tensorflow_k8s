@@ -3,7 +3,6 @@ from gen_captcha import gen_captcha_text_and_image
 from gen_captcha import number
 from gen_captcha import alphabet
 from gen_captcha import ALPHABET
-import logging
 
 import time 
 import numpy as np
@@ -194,22 +193,19 @@ def train_crack_captcha_cnn():
         while True:
             batch_x, batch_y = get_next_batch(64)
             _, loss_ = sess.run([optimizer, loss], feed_dict={X: batch_x, Y: batch_y, keep_prob: 0.75})
-            #print(step, loss_) 
-            logging.debug("step:{%d},loss:{%f}",step,loss_)
+            print(step, loss_)
 
             #writer.add_summary(summary,step)
             # 每100 step计算一次准确率
             if step % 100 == 0:
                 batch_x_test, batch_y_test = get_next_batch(100)
                 summary, acc = sess.run([merged, accuracy], feed_dict={X: batch_x_test, Y: batch_y_test, keep_prob: 1.})
-                #print(step, acc)
-                logging.debug("step:{%d},acc:{%f}",step,acc)
-
+                print(step, acc)
+                
                 writer.add_summary(summary,step)
 
                 # 如果准确率大于50%,保存模型,完成训练
-                #if step == 7000:
-                if acc > 0.8:
+                if step == 7000:
                     saver.save(sess, ".\crack_capcha.model", global_step=step)
                     break
  
@@ -220,8 +216,6 @@ def train_crack_captcha_cnn():
 
 if __name__ == '__main__': 
     start = time.clock()
-    LOG_FORMAT = '%(asctime)s-%(levelname)s-[%(process)d]-[%(thread)d] %(message)s (%(filename)s:%(lineno)d)'
-    logging.basicConfig(format=LOG_FORMAT,level=logging.DEBUG,filename="./ts.log",filemode='w')
 
     train_crack_captcha_cnn()
 

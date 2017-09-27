@@ -4,17 +4,18 @@ from gen_captcha import number
 from gen_captcha import alphabet
 from gen_captcha import ALPHABET
 import logging
-
+import os
+import os.path
 import time 
 import numpy as np
 import tensorflow as tf
+import random
+from PIL import Image
  
-text, image = gen_captcha_text_and_image()
-print("verification code iamge channel:", image.shape)  # (60, 160, 3)
 # 图像大小
-IMAGE_HEIGHT = 60
-IMAGE_WIDTH = 160
-MAX_CAPTCHA = len(text)
+IMAGE_HEIGHT = 32
+IMAGE_WIDTH = 90
+MAX_CAPTCHA = 4
 print("Max number of label:", MAX_CAPTCHA)   # 验证码最长4字符; 我全部固定为4,可以不固定. 如果验证码长度小于4，用'_'补齐
  
 # 把彩色图像转为灰度图像（色彩对识别验证码没有什么用）
@@ -87,6 +88,26 @@ vec = text2vec("SFd5")
 text = vec2text(vec)
 print(text)  # SFd5
 """
+
+def list_all_file(rootDir,all_file): 
+    if not os.path.exists(rootDir) or not os.path.isdir(rootDir):
+        return False
+    try:
+        for lists in os.listdir(rootDir): 
+            path = os.path.join(rootDir, lists) 
+            all_file.append(path)
+            if os.path.isdir(path): 
+                list_all_file(path,all_file) 
+    except Exception as e:
+        print(e)
+        return False
+    return True
+
+g_train_all_files = []
+list_all_file("./train_set",g_train_all_files)
+g_test_all_files = []
+list_all_file("./test_set",g_test_all_files)
+random.seed()
  
 # 生成一个训练batch
 def get_next_batch(batch_size=128):
@@ -95,10 +116,38 @@ def get_next_batch(batch_size=128):
  
     # 有时生成图像大小不是(60, 160, 3)
     def wrap_gen_captcha_text_and_image():
-        while True:
-            text, image = gen_captcha_text_and_image()
-            if image.shape == (60, 160, 3):
-                return text, image
+        file_item = random.choice(g_train_all_files)
+        base_name = os.path.basename(file_item)
+        pos = base_name.find(".jpg") 
+        text = base_name[:pos] 
+        captcha_image = Image.open(file_item)
+        image = np.array(captcha_image)
+        if image.shape == (32, 90, 3):
+            return text, image
+ 
+    for i in range(batch_size):
+        text, image = wrap_gen_captcha_text_and_image()
+        image = convert2gray(image)
+ 
+        batch_x[i,:] = image.flatten() / 255 # (image.flatten()-128)/128  mean为0
+        batch_y[i,:] = text2vec(text)
+ 
+    return batch_x, batch_y
+
+def get_next_test_batch(batch_size=128):
+    batch_x = np.zeros([batch_size, IMAGE_HEIGHT*IMAGE_WIDTH])
+    batch_y = np.zeros([batch_size, MAX_CAPTCHA*CHAR_SET_LEN])
+ 
+    # 有时生成图像大小不是(60, 160, 3)
+    def wrap_gen_captcha_text_and_image():
+        file_item = random.choice(g_test_all_files)
+        base_name = os.path.basename(file_item)
+        pos = base_name.find(".jpg") 
+        text = base_name[:pos] 
+        captcha_image = Image.open(file_item)
+        image = np.array(captcha_image)
+        if image.shape == (32, 90, 3):
+            return text, image
  
     for i in range(batch_size):
         text, image = wrap_gen_captcha_text_and_image()
@@ -118,36 +167,39 @@ keep_prob = tf.placeholder(tf.float32) # dropout
  
 # 定义CNN
 def crack_captcha_cnn(w_alpha=0.01, b_alpha=0.1):
+    #print("******************",IMAGE_HEIGHT,IMAGE_WIDTH)
     x = tf.reshape(X, shape=[-1, IMAGE_HEIGHT, IMAGE_WIDTH, 1])
- 
-    #w_c1_alpha = np.sqrt(2.0/(IMAGE_HEIGHT*IMAGE_WIDTH)) #
-    #w_c2_alpha = np.sqrt(2.0/(3*3*32)) 
-    #w_c3_alpha = np.sqrt(2.0/(3*3*64)) 
-    #w_d1_alpha = np.sqrt(2.0/(8*32*64))
-    #out_alpha = np.sqrt(2.0/1024)
  
     # 3 conv layer
     w_c1 = tf.Variable(w_alpha*tf.random_normal([3, 3, 1, 32]))
     b_c1 = tf.Variable(b_alpha*tf.random_normal([32]))
     conv1 = tf.nn.relu(tf.nn.bias_add(tf.nn.conv2d(x, w_c1, strides=[1, 1, 1, 1], padding='SAME'), b_c1))
+    print("******.conv1",conv1.get_shape())
     conv1 = tf.nn.max_pool(conv1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
     conv1 = tf.nn.dropout(conv1, keep_prob)
+    print("******.after conv1",conv1.get_shape())
  
     w_c2 = tf.Variable(w_alpha*tf.random_normal([3, 3, 32, 64]))
     b_c2 = tf.Variable(b_alpha*tf.random_normal([64]))
     conv2 = tf.nn.relu(tf.nn.bias_add(tf.nn.conv2d(conv1, w_c2, strides=[1, 1, 1, 1], padding='SAME'), b_c2))
+    print("******.conv2",conv2.get_shape())
     conv2 = tf.nn.max_pool(conv2, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
     conv2 = tf.nn.dropout(conv2, keep_prob)
+    print("******.after conv2",conv2.get_shape())
  
     w_c3 = tf.Variable(w_alpha*tf.random_normal([3, 3, 64, 64]))
     b_c3 = tf.Variable(b_alpha*tf.random_normal([64]))
     conv3 = tf.nn.relu(tf.nn.bias_add(tf.nn.conv2d(conv2, w_c3, strides=[1, 1, 1, 1], padding='SAME'), b_c3))
+    print("******.conv3",conv3.get_shape())
     conv3 = tf.nn.max_pool(conv3, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
     conv3 = tf.nn.dropout(conv3, keep_prob)
+    print("******.after conv3",conv3.get_shape())
  
     # Fully connected layer
-    w_d = tf.Variable(w_alpha*tf.random_normal([8*20*64, 1024]))
+    w_d = tf.Variable(w_alpha*tf.random_normal([4*12*64, 1024]))
     b_d = tf.Variable(b_alpha*tf.random_normal([1024]))
+    print("******.w_d",w_d.get_shape())
+    print("******.connv3",conv3.get_shape())
     dense = tf.reshape(conv3, [-1, w_d.get_shape().as_list()[0]])
     dense = tf.nn.relu(tf.add(tf.matmul(dense, w_d), b_d))
     dense = tf.nn.dropout(dense, keep_prob)
@@ -200,7 +252,7 @@ def train_crack_captcha_cnn():
             #writer.add_summary(summary,step)
             # 每100 step计算一次准确率
             if step % 100 == 0:
-                batch_x_test, batch_y_test = get_next_batch(100)
+                batch_x_test, batch_y_test = get_next_test_batch(100)
                 summary, acc = sess.run([merged, accuracy], feed_dict={X: batch_x_test, Y: batch_y_test, keep_prob: 1.})
                 #print(step, acc)
                 logging.debug("step:{%d},acc:{%f}",step,acc)
@@ -210,7 +262,7 @@ def train_crack_captcha_cnn():
                 # 如果准确率大于50%,保存模型,完成训练
                 #if step == 7000:
                 if acc > 0.8:
-                    saver.save(sess, ".\crack_capcha.model", global_step=step)
+                    saver.save(sess, "verify_code.model", global_step=step)
                     break
  
             step += 1
