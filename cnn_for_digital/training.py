@@ -1,8 +1,4 @@
 #encoding=utf-8
-from gen_captcha import gen_captcha_text_and_image
-from gen_captcha import number
-from gen_captcha import alphabet
-from gen_captcha import ALPHABET
 import logging
 import os
 import os.path
@@ -12,10 +8,11 @@ import tensorflow as tf
 import random
 from PIL import Image
  
+g_number_def = ['0','1','2','3','4','5','6','7','8','9']
 # 图像大小
 IMAGE_HEIGHT = 32
-IMAGE_WIDTH = 90
-MAX_CAPTCHA = 4
+IMAGE_WIDTH = 32
+MAX_CAPTCHA = 1
 print("Max number of label:", MAX_CAPTCHA)   # 验证码最长4字符; 我全部固定为4,可以不固定. 如果验证码长度小于4，用'_'补齐
  
 # 把彩色图像转为灰度图像（色彩对识别验证码没有什么用）
@@ -35,7 +32,7 @@ np.pad(image,((2,3),(2,2)), 'constant', constant_values=(255,))  # 在图像上�
 """
  
 # 文本转向量
-char_set = number + alphabet + ALPHABET + ['_']  # 如果验证码长度小于4, '_'用来补齐
+char_set = g_number_def 
 CHAR_SET_LEN = len(char_set)
 def text2vec(text):
     text_len = len(text)
@@ -103,48 +100,31 @@ def list_all_file(rootDir,all_file):
         return False
     return True
 
-def classify_all_file(all_file):
-    data_dict = {}
-    for item in all_file:
-        base_name = os.path.basename(item)
-        pos = base_name.find(".jpg")
-        base_chars = base_name[:pos]
-        for c in base_chars:
-            if c in data_dict.keys():
-                file_list = data_dict[c]
-                file_list.append(item)
-                data_dict[c] = file_list
-            else:
-                file_list = [item]
-                data_dict[c] = file_list
-    return data_dict
-                
-
 g_train_all_files = []
 list_all_file("./train_set",g_train_all_files)
 g_test_all_files = []
 list_all_file("./test_set",g_test_all_files)
-g_train_files_dict = classify_all_file(g_train_all_files)
+
 
  
 # 生成一个训练batch
 def get_next_batch(batch_size=128):
     batch_x = np.zeros([batch_size, IMAGE_HEIGHT*IMAGE_WIDTH])
     batch_y = np.zeros([batch_size, MAX_CAPTCHA*CHAR_SET_LEN])
- 
-    # 有时生成图像大小不是(60, 160, 3)
     def wrap_gen_captcha_text_and_image(index):
-        keys = g_train_files_dict.keys()
-        key_index = index % len(keys)
-        key = keys[key_index]
+        global g_train_all_files
         random.seed()
-        file_item = random.choice(g_train_files_dict[key])
+        file_item = random.choice(g_train_all_files)
         base_name = os.path.basename(file_item)
+            
         pos = base_name.find(".jpg") 
-        text = base_name[:pos] 
+        file_name = base_name[:pos] 
+        name_slice = file_name.split("_")
+        text = name_slice[2]
+
         captcha_image = Image.open(file_item)
         image = np.array(captcha_image)
-        if image.shape == (32, 90, 3):
+        if image.shape == (IMAGE_HEIGHT, IMAGE_WIDTH, 3):
             return text, image
  
     for i in range(batch_size):
@@ -165,11 +145,15 @@ def get_next_test_batch(batch_size=128):
         random.seed()
         file_item = random.choice(g_test_all_files)
         base_name = os.path.basename(file_item)
+
         pos = base_name.find(".jpg") 
-        text = base_name[:pos] 
+        file_name = base_name[:pos] 
+        name_slice = file_name.split("_")
+        text = name_slice[2]
+
         captcha_image = Image.open(file_item)
         image = np.array(captcha_image)
-        if image.shape == (32, 90, 3):
+        if image.shape == (IMAGE_HEIGHT, IMAGE_WIDTH, 3):
             return text, image
  
     for i in range(batch_size):
@@ -219,7 +203,7 @@ def crack_captcha_cnn(w_alpha=0.01, b_alpha=0.1):
     print("******.after conv3",conv3.get_shape())
  
     # Fully connected layer
-    w_d = tf.Variable(w_alpha*tf.random_normal([4*12*64, 1024]))
+    w_d = tf.Variable(w_alpha*tf.random_normal([4*4*64, 1024]))
     b_d = tf.Variable(b_alpha*tf.random_normal([1024]))
     print("******.w_d",w_d.get_shape())
     print("******.connv3",conv3.get_shape())
@@ -264,11 +248,18 @@ def train_crack_captcha_cnn():
         writer = tf.summary.FileWriter("log/",sess.graph)
 
         sess.run(tf.global_variables_initializer())
+        saver.restore(sess, tf.train.latest_checkpoint('./'))
  
         step = 0
-        is_save_dot_6 = True
         is_save_dot_7 = True
         is_save_dot_75 = True
+        is_save_dot_8 = True
+        is_save_dot_85 = True
+        is_save_dot_9 = True
+        is_save_dot_92 = True
+        is_save_dot_93 = True
+        is_save_dot_95 = True
+
         while True:
             batch_x, batch_y = get_next_batch(256)
             _, loss_ = sess.run([optimizer, loss], feed_dict={X: batch_x, Y: batch_y, keep_prob: 0.75})
@@ -287,16 +278,31 @@ def train_crack_captcha_cnn():
 
                 # 如果准确率大于50%,保存模型,完成训练
                 #if step == 7000:
-                if acc > 0.6 and is_save_dot_6:
-                    saver.save(sess, "verify_code.model", global_step=step)
-                    is_save_dot_6 = False
                 if acc > 0.7 and is_save_dot_7:
                     saver.save(sess, "verify_code.model", global_step=step)
                     is_save_dot_7 = False
                 if acc > 0.75 and is_save_dot_75:
                     saver.save(sess, "verify_code.model", global_step=step)
                     is_save_dot_75 = False
-                if acc > 0.8:
+                if acc > 0.8 and is_save_dot_8:
+                    saver.save(sess, "verify_code.model", global_step=step)
+                    is_save_dot_8 = False 
+                if acc > 0.85 and is_save_dot_85:
+                    saver.save(sess, "verify_code.model", global_step=step)
+                    is_save_dot_85 = False 
+                if acc > 0.90 and is_save_dot_9:
+                    saver.save(sess, "verify_code.model", global_step=step)
+                    is_save_dot_9 = False 
+                if acc > 0.92 and is_save_dot_92:
+                    saver.save(sess, "verify_code.model", global_step=step)
+                    is_save_dot_92 = False 
+                if acc > 0.93 and is_save_dot_93:
+                    saver.save(sess, "verify_code.model", global_step=step)
+                    is_save_dot_93 = False 
+                if acc > 0.95 and is_save_dot_95:
+                    saver.save(sess, "verify_code.model", global_step=step)
+                    is_save_dot_95 = False 
+                if acc > 0.999:
                     saver.save(sess, "verify_code.model", global_step=step)
                     break
  
